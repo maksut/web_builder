@@ -1,0 +1,38 @@
+{:paths ["src" "test" "resources"]
+
+ :deps
+ {org.clojure/clojure {:mvn/version "1.11.1"}
+  ring/ring-jetty-adapter {:mvn/version "1.9.3"}
+  metosin/reitit-ring {:mvn/version "0.7.0-alpha7"}
+  metosin/reitit-dev {:mvn/version "0.7.0-alpha7"}
+  metosin/reitit-middleware {:mvn/version "0.7.0-alpha7"}
+  metosin/reitit-malli {:mvn/version "0.7.0-alpha7"}
+  hiccup/hiccup {:mvn/version "2.0.0-RC1"}
+  integrant/integrant {:mvn/version "0.8.1"}}
+
+ :aliases
+ {;; run server only: clj -X:server
+  :server {:exec-fn system/restart}
+
+  ;; nrepl only: clj -M:repl/nrepl 
+  :repl/nrepl
+  {:extra-deps {nrepl/nrepl       {:mvn/version "1.0.0"}
+                cider/cider-nrepl {:mvn/version "0.28.7"}
+                djblue/portal     {:mvn/version "0.37.1"}}
+   :main-opts  ["-m" "nrepl.cmdline"
+                "--middleware" "[cider.nrepl/cider-middleware]"
+                "--interactive"]}
+
+  ;; nrepl with flowstorm debugger: clj -M:dev
+  :dev {:extra-paths ["dev"]
+        :classpath-overrides {org.clojure/clojure nil} ;; for disabling the official compiler
+        :extra-deps {nrepl/nrepl       {:mvn/version "1.0.0"}
+                     cider/cider-nrepl {:mvn/version "0.28.7"}
+                     djblue/portal     {:mvn/version "0.37.1"}
+                     com.github.jpmonettas/clojure {:mvn/version "1.11.1-9"}
+                     com.github.jpmonettas/flow-storm-dbg {:mvn/version "3.7.3"}}
+        :jvm-opts ["-Dclojure.storm.instrumentEnable=true"
+                   "-Dclojure.storm.instrumentOnlyPrefixes=server"]
+        :main-opts  ["-m" "nrepl.cmdline"
+                     "--middleware" "[cider.nrepl/cider-middleware]"
+                     "--interactive"]}}}

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>htmx test</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
+</head>
+<body>
+    <header>
+      <h2>raylib web build tool</h2>
+    </header>
+    <!-- nav>
+        <ul>
+            <li><a href="#">Home</a></li>
+            <li><a href="#">About</a></li>
+            <li><a href="#">Services</a></li>
+            <li><a href="#">Contact</a></li>
+        </ul>
+    </nav -->
+    <main>
+      <h3>Anything you upload is public!</h3>
+      <h3>Good luck!</h3>
+      <form enctype="multipart/form-data" action="/upload" method="post">
+        <div class="input-group">
+          <label for="file">Select files</label>
+          <input id="file" type="file" name="file" multiple/>
+        </div>
+        <button type="submit">Upload</button>
+      </form>
+    </main>
+    <footer>
+    </footer>
+    <script src="https://unpkg.com/htmx.org@1.9.4"></script>
+</body>
+</html>
