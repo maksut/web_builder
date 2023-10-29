@@ -68,8 +68,18 @@
 (defn new-builder-id! []
   (uuid->base64 (java.util.UUID/randomUUID)))
 
+(string/ends-with? "testing.zip" ".zip")
+
+(defn unzip [builder-dir filename]
+  (cond
+    (string/ends-with? filename ".zip") (shell/sh "unzip" filename :dir builder-dir)
+    (or (string/ends-with? filename ".tgz")
+        (string/ends-with? filename ".tar.gz")) (shell/sh "tar" "zxvf" filename :dir builder-dir)
+    (string/ends-with? filename ".gz") (shell/sh "gzip -d" filename :dir builder-dir)))
+
 (defn upload-file [builder-dir {:keys [^File tempfile filename]}]
-  (io/copy tempfile (io/file builder-dir filename)))
+  (io/copy tempfile (io/file builder-dir filename))
+  (unzip builder-dir filename))
 
 (defn make-command [builder-dir]
   (mapcat
@@ -117,20 +127,27 @@
   (.relativize (.toPath relative-to) (.toPath file)))
 
 (defn encode-path [^Path path]
-  (let [segments (iterator-seq (.iterator path))]
-    (->> segments
-         (map codec/url-encode)
-         (string/join "/"))))
+  (let [segments (iterator-seq (.iterator path))
+        encoded (map codec/url-encode segments)]
+    (string/join "/" encoded)))
 
-(defn list-files [builder-id]
-  (let [builder-dir (get-builder-dir builder-id)]
-    (->> builder-dir
-         file-seq
-         (filter (fn [^File f] (.isFile f))) ; skipping folders, keeping only files
-         (map (partial relative-path builder-dir)))))
+(defn list-files [builder-dir]
+  (->> builder-dir
+       file-seq
+       (filter (fn [^File f] (.isFile f))) ; skipping folders, keeping only files
+       (map (partial relative-path builder-dir))))
+
+(defn find-src-dir [^File dir]
+  (let [src? (fn [^File f] (and (.isDirectory f) (= "src" (.getName f))))
+        depth (fn [^File f] (-> f .toPath .getNameCount))
+        all-src-dirs (filter src? (file-seq dir))
+        first-src (apply max-key depth all-src-dirs)]
+    (when first-src (relative-path dir first-src))))
 
 (defn builder-get [request]
   (let [builder-id (-> request :path-params :builder-id)
+        builder-dir (get-builder-dir builder-id)
+        src-dir (find-src-dir builder-dir)
         upload-path (get-path request ::builder-upload-post {:builder-id builder-id})]
     {:body (html5
             (full-page
@@ -138,12 +155,13 @@
               [:div
                [:label {:for "file"} "Upload game source code"]
                [:input {:type "file" :name "file" :multiple true}]
-               [:button {:type "submit"} "Upload"]]]
+               [:button {:type "submit"} "Upload"]]
+              (when src-dir [:p (str "\"src\" dir: " (str src-dir))])]
              [:ul
               (map (fn [rel-path]
                      ;; manually crafting the URL here because reitit insists on encodeing file fragment
                      [:li [:a {:href (str "/b/" builder-id "/f/" (encode-path rel-path))} (str rel-path)]])
-                   (list-files builder-id))]))}))
+                   (list-files builder-dir))]))}))
 
 (defn builder-file-get [{{:keys [builder-id file]} :path-params}]
   (let [builder-dir (get-builder-dir builder-id)
