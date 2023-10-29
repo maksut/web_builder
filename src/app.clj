@@ -6,14 +6,27 @@
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
    [clojure.string :as string]
-   [ring.util.response :as response]
-   [ring.util.codec :as codec])
+   [ring.util.codec :as codec]
+   [ring.util.io]
+   [ring.util.response :as response])
   (:import
-   [java.io File]))
+   [java.io File]
+   [java.nio.file Path]))
 
 (set! *warn-on-reflection* true)
 
-(def datadir (.getCanonicalPath (io/file "datadir")))
+(def datadir (io/file "datadir"))
+
+(defn throw-response! [response]
+  (throw (ex-info (str "HTTP " (:status response))
+                  {:type :reitit.ring/response
+                   :response response})))
+
+(defn throw-bad-request! [body]
+  (throw-response! {:status 400 :body body}))
+
+(defn throw-not-found! [body]
+  (throw-response! {:status 404 :body body}))
 
 (defn get-path [{::reitit/keys [router]} path-name path-params]
   (-> router
@@ -36,7 +49,7 @@
    [:body content]])
 
 (defn is-hx-request [{:keys [headers]}]
-  (= "true" (get headers "hx-request")))
+  (not= "false" (get headers "hx-request")))
 
 (defn htmx-view [request response-body]
   {:body (if (is-hx-request request)
@@ -65,50 +78,61 @@
     (str "-v " builder-dir "/src:/game/src") ; volume mapping
     "-w /game/src raylib:web make PLATFORM=PLATFORM_WEB"])) ; make in working directory
 
-(make-command (io/file "/home/maksut/oss/raylib-game-template"))
+; (make-command (io/file "/home/maksut/oss/raylib-game-template"))
 
 (defn make [builder-dir]
   (apply shell/sh (make-command builder-dir)))
 
+(defn assert-file-in-parent! [^File file ^File parent]
+  (let [parent-canon (.getCanonicalPath parent)
+        file-canon (.getCanonicalPath file)]
+    (when-not (string/starts-with? file-canon parent-canon)
+      (throw-bad-request! {})) ; if outside the datadir then 403
+    (when-not (.exists file)
+      (throw-not-found! {})))) ; if not exists then 404
+
 (defn get-builder-dir [builder-id]
-  (let [builder-dir (io/file datadir builder-id)
-        builder-dir-canon (.getCanonicalPath builder-dir)]
-    (when-not (string/starts-with? builder-dir-canon datadir)
-      (throw (ex-info "Not found" {:status 404})))
+  (let [builder-dir (io/file datadir builder-id)]
+    (assert-file-in-parent! builder-dir datadir)
     builder-dir))
 
-(defn buldier-upload-post [request]
-  (let [file-param (-> request :parameters :multipart :file)
-        files (if (vector? file-param) file-param [file-param])
-        files (filter #(-> % :filename empty? not) files) ; filter out records with empty names
+(defn builder-upload-post [request]
+  (let [file-param (-> request :parameters :multipart :file) ; can be a single for or multiple files
+        files (if (vector? file-param) file-param [file-param]) ; convert that into a file seq
+        files (filter #(-> % :filename seq) files) ; filter out ones with empty names
         builder-id (-> request :path-params :builder-id)
         builder-dir (get-builder-dir builder-id)
         builder-path (get-path request ::builder-get {:builder-id builder-id})]
-    (dorun (map (partial upload-file builder-dir) files))
+    (dorun (map (partial upload-file builder-dir) files)) ; copy all non-empty files under the builder dir
     (response/redirect builder-path :see-other)))
 
 (defn builder-post [request]
   (let [id (new-builder-id!)
         builder-dir (io/file datadir id)
         builder-path (get-path request ::builder-get {:builder-id id})]
-    (.mkdirs builder-dir)
+    (.mkdirs builder-dir) ; create the builder dir if not exists
     (response/redirect builder-path :see-other)))
 
 (defn relative-path [^File relative-to ^File file]
-  (.toString (.relativize (.toPath relative-to) (.toPath file))))
+  (.relativize (.toPath relative-to) (.toPath file)))
+
+(defn encode-path [^Path path]
+  (let [segments (iterator-seq (.iterator path))]
+    (->> segments
+         (map codec/url-encode)
+         (string/join "/"))))
 
 (defn list-files [builder-id]
   (let [builder-dir (get-builder-dir builder-id)]
     (->> builder-dir
          file-seq
-         rest ; skip the builder dir itself
+         (filter (fn [^File f] (.isFile f))) ; skipping folders, keeping only files
          (map (partial relative-path builder-dir)))))
 
 (defn builder-get [request]
   (let [builder-id (-> request :path-params :builder-id)
         upload-path (get-path request ::builder-upload-post {:builder-id builder-id})]
-    {:status 200
-     :body (html5
+    {:body (html5
             (full-page
              [:form {:enctype "multipart/form-data" :action upload-path :method "post"}
               [:div
@@ -116,7 +140,17 @@
                [:input {:type "file" :name "file" :multiple true}]
                [:button {:type "submit"} "Upload"]]]
              [:ul
-              (map (fn [file] [:li (codec/url-encode file)]) (list-files builder-id))]))}))
+              (map (fn [rel-path]
+                     ;; manually crafting the URL here because reitit insists on encodeing file fragment
+                     [:li [:a {:href (str "/b/" builder-id "/f/" (encode-path rel-path))} (str rel-path)]])
+                   (list-files builder-id))]))}))
+
+(defn builder-file-get [{{:keys [builder-id file]} :path-params}]
+  (let [builder-dir (get-builder-dir builder-id)
+        file (io/file builder-dir file)]
+    (assert-file-in-parent! file builder-dir)
+    {:body (ring.util.io/piped-input-stream
+            (fn [ostream] (io/copy file ostream)))}))
 
 (def builder-id-spec
   [:re #"^[a-zA-Z0-9_\-]{22}$"])
@@ -139,10 +173,22 @@
     {:name ::builder-upload-post
      :post {:parameters {:path [:map [:builder-id builder-id-spec]]
                          :multipart [:map [:file file-spec]]}
-            :handler buldier-upload-post}}]])
+            :handler builder-upload-post}}]
+   ["/b/:builder-id/f/*file"
+    {:name ::builder-file-get
+     :get {:parameters {:path [:map [:builder-id builder-id-spec]]}
+           :handler builder-file-get}}]])
 
 (comment
   (let [router (reitit/router routes)]
     (->
      (reitit/match-by-name router ::builder-upload-post {:builder-id (new-builder-id!)})
-     (reitit/match->path))))
+     (reitit/match->path)))
+
+  (let [router (reitit/router routes)]
+    (->
+     (reitit/match-by-name router ::builder-file-get {:builder-id (new-builder-id!) :file "testing/game.html"})
+     #_(reitit/match->path)))
+
+  (let [router (reitit/router routes)]
+    (reitit/match-by-path router "/b/uGtxV1WHTeenblTRFsY8Ng/f/keyboard.pdf")))

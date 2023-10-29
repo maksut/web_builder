@@ -6,11 +6,13 @@
    [reitit.core]
    [reitit.coercion.malli]
    [reitit.ring :as ring]
+   [reitit.ring.coercion :as coercion]
    [reitit.ring.middleware.dev :as dev]
    [reitit.ring.middleware.exception :as exception]
    [reitit.ring.middleware.multipart :as multipart]
    [reitit.ring.middleware.muuntaja :as muuntaja]
    [reitit.ring.middleware.parameters :as parameters]
+   [reitit.ring.spec :as spec]
    [ring.adapter.jetty :as jetty])
   (:import [org.eclipse.jetty.server Server]))
 
@@ -49,6 +51,7 @@
    (ring/router
     routes
     {:reitit.middleware/transform dev/print-request-diffs ;; pretty diffs for dev
+     :validate spec/validate ;; enable spec validation for route data
      :muuntaja muuntaja.core/instance
      :data {:coercion reitit.coercion.malli/coercion
             :middleware [parameters/parameters-middleware
@@ -57,6 +60,7 @@
                           (merge
                            exception/default-handlers
                            {::exception/wrap exception-middleware}))
+                         coercion/coerce-request-middleware
                          multipart/multipart-middleware]}})
    (ring/routes
     (ring/create-resource-handler {:path "/"})

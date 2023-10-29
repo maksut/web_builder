@@ -32,7 +32,7 @@
                      com.github.jpmonettas/clojure {:mvn/version "1.11.1-9"}
                      com.github.jpmonettas/flow-storm-dbg {:mvn/version "3.7.3"}}
         :jvm-opts ["-Dclojure.storm.instrumentEnable=true"
-                   "-Dclojure.storm.instrumentOnlyPrefixes=server"]
+                   "-Dclojure.storm.instrumentOnlyPrefixes=server,app"]
         :main-opts  ["-m" "nrepl.cmdline"
                      "--middleware" "[cider.nrepl/cider-middleware]"
                      "--interactive"]}}}
