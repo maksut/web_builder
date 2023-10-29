@@ -3,6 +3,7 @@
    [app]
    [integrant.core :as ig]
    [muuntaja.core]
+   [reitit.core]
    [reitit.coercion.malli]
    [reitit.ring :as ring]
    [reitit.ring.middleware.dev :as dev]
@@ -10,7 +11,10 @@
    [reitit.ring.middleware.multipart :as multipart]
    [reitit.ring.middleware.muuntaja :as muuntaja]
    [reitit.ring.middleware.parameters :as parameters]
-   [ring.adapter.jetty :as jetty]))
+   [ring.adapter.jetty :as jetty])
+  (:import [org.eclipse.jetty.server Server]))
+
+(set! *warn-on-reflection* true)
 
 (def system-config
   {::jetty   {:port    3000
@@ -23,11 +27,11 @@
   (println "starting server in port" port)
   (jetty/run-jetty handler {:port port :join? join?}))
 
-(defmethod ig/halt-key! ::jetty [_ server]
+(defmethod ig/halt-key! ::jetty [_ ^Server server]
   (println "stopping the server")
   (.stop server))
 
-(defn exception-middleware [handler e request]
+(defn exception-middleware [handler ^Throwable e request]
   (let [response (handler e request)
         body (:body response)
         type (:type body)]
@@ -60,3 +64,9 @@
 
 (defn -main []
   (ig/init system-config))
+
+(comment
+  (def router
+    (ring/router ["/public/{*path}"]))
+
+  (reitit.core/match-by-path router "/public/testing/hebele%20/hubele/"))
