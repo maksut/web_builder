@@ -1,11 +1,12 @@
 (ns app
   (:require
-   [reitit.core :as reitit]
-   [reitit.ring.malli]
-   [hiccup2.core :refer [html, raw]]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
    [clojure.string :as string]
+   [clojure.pprint :as pprint]
+   [reitit.core :as reitit]
+   [reitit.ring.malli]
+   [hiccup2.core :refer [html, raw]]
    [ring.util.codec :as codec]
    [ring.util.io]
    [ring.util.response :as response])
@@ -68,8 +69,6 @@
 (defn new-builder-id! []
   (uuid->base64 (java.util.UUID/randomUUID)))
 
-(string/ends-with? "testing.zip" ".zip")
-
 (defn unzip [builder-dir filename]
   (cond
     (string/ends-with? filename ".zip") (shell/sh "unzip" filename :dir builder-dir)
@@ -77,21 +76,49 @@
         (string/ends-with? filename ".tar.gz")) (shell/sh "tar" "zxvf" filename :dir builder-dir)
     (string/ends-with? filename ".gz") (shell/sh "gzip -d" filename :dir builder-dir)))
 
-(defn upload-file [builder-dir {:keys [^File tempfile filename]}]
-  (io/copy tempfile (io/file builder-dir filename))
-  (unzip builder-dir filename))
-
-(defn make-command [builder-dir]
+(defn make-command [src-dir]
   (mapcat
    #(string/split % #"\s+")
    ["podman run --rm " ; remove container after exit
-    (str "-v " builder-dir "/src:/game/src") ; volume mapping
+    (str "-v " src-dir ":/game/src") ; volume mapping
     "-w /game/src raylib:web make PLATFORM=PLATFORM_WEB"])) ; make in working directory
 
-; (make-command (io/file "/home/maksut/oss/raylib-game-template"))
+; (make-command (.toPath (io/file "/home/maksut/oss/raylib-game-template/src")))
 
-(defn make [builder-dir]
-  (apply shell/sh (make-command builder-dir)))
+(defn make [^File src-dir]
+  (let [src-dir (.getAbsoluteFile src-dir)
+        command (vec (make-command src-dir))
+        command (conj command :dir (str src-dir))
+        result (apply shell/sh command)]
+    (pprint/pprint
+     result
+     (io/writer (io/file src-dir "makefile_output.txt")))))
+
+; (let [src (find-src-dir (io/file "/home/maksut/oss/raylib-game-template"))]
+;   (make src))
+
+(defn relative-path [^File relative-to ^File file]
+  (.relativize (.toPath relative-to) (.toPath file)))
+
+(defn encode-path [^Path path]
+  (let [segments (iterator-seq (.iterator path))
+        encoded (map codec/url-encode segments)]
+    (string/join "/" encoded)))
+
+(defn find-src-dir [^File dir]
+  (let [src? (fn [^File f] (and (.isDirectory f) (= "src" (.getName f))))
+        depth (fn [^File f] (-> f .toPath .getNameCount))
+        all-src-dirs (filter src? (file-seq dir))]
+    (apply min-key depth all-src-dirs)))
+
+(defn upload-file [builder-dir {:keys [^File tempfile filename]}]
+  (io/copy tempfile (io/file builder-dir filename))
+  (unzip builder-dir filename)
+  (when-let [src-dir (find-src-dir builder-dir)]
+    (make src-dir)))
+
+; (let [src (find-src-dir (io/file "/home/maksut/projects/web_build/datadir/ytyg0t_XTr2IYKf2QCy5_g"))]
+;   (make src))
 
 (defn assert-file-in-parent! [^File file ^File parent]
   (let [parent-canon (.getCanonicalPath parent)
@@ -123,31 +150,17 @@
     (.mkdirs builder-dir) ; create the builder dir if not exists
     (response/redirect builder-path :see-other)))
 
-(defn relative-path [^File relative-to ^File file]
-  (.relativize (.toPath relative-to) (.toPath file)))
-
-(defn encode-path [^Path path]
-  (let [segments (iterator-seq (.iterator path))
-        encoded (map codec/url-encode segments)]
-    (string/join "/" encoded)))
-
 (defn list-files [builder-dir]
   (->> builder-dir
        file-seq
        (filter (fn [^File f] (.isFile f))) ; skipping folders, keeping only files
        (map (partial relative-path builder-dir))))
 
-(defn find-src-dir [^File dir]
-  (let [src? (fn [^File f] (and (.isDirectory f) (= "src" (.getName f))))
-        depth (fn [^File f] (-> f .toPath .getNameCount))
-        all-src-dirs (filter src? (file-seq dir))
-        first-src (apply max-key depth all-src-dirs)]
-    (when first-src (relative-path dir first-src))))
-
 (defn builder-get [request]
   (let [builder-id (-> request :path-params :builder-id)
         builder-dir (get-builder-dir builder-id)
         src-dir (find-src-dir builder-dir)
+        src-dir (or src-dir (relative-path builder-dir src-dir))
         upload-path (get-path request ::builder-upload-post {:builder-id builder-id})]
     {:body (html5
             (full-page
