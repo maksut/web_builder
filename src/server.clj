@@ -14,7 +14,8 @@
    [reitit.ring.middleware.parameters :as parameters]
    [reitit.ring.spec :as spec]
    [ring.adapter.jetty :as jetty])
-  (:import [org.eclipse.jetty.server Server]))
+  (:import [org.eclipse.jetty.server Server])
+  (:gen-class))
 
 (set! *warn-on-reflection* true)
 

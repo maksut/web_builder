@@ -3,7 +3,6 @@
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
    [clojure.string :as string]
-   [clojure.pprint :as pprint]
    [reitit.core :as reitit]
    [reitit.ring.malli]
    [hiccup2.core :refer [html, raw]]
@@ -34,11 +33,14 @@
       (reitit/match-by-name path-name path-params)
       (reitit/match->path)))
 
-(defn html5 [content]
-  (str (html {:mode :html}
-             (when (= :html (first content)) ;; if this is full page
-               (raw "<!DOCTYPE html>\n"))    ;; then add the doctype
-             content)))
+(defn html-response [status & content]
+  {:headers {"Content-Type" "text/html"}
+   :status status
+   :body
+   (str (html {:mode :html}
+              (when (= :html (first content)) ;; if this is full page
+                (raw "<!DOCTYPE html>\n"))    ;; then add the doctype
+              content))})
 
 (defn full-page [& content]
   [:html
@@ -50,12 +52,14 @@
    [:body content]])
 
 (defn is-hx-request [{:keys [headers]}]
-  (not= "false" (get headers "hx-request")))
+  (= "true" (get headers "hx-request")))
 
-(defn htmx-view [request response-body]
-  {:body (if (is-hx-request request)
-           response-body
-           (full-page response-body))})
+(defn htmx [request & content]
+  (html-response
+   200
+   (if (is-hx-request request)
+     content
+     (full-page content))))
 
 (defn uuid->base64 [^java.util.UUID uuid]
   (let [base64 (.withoutPadding (java.util.Base64/getUrlEncoder))
@@ -89,12 +93,13 @@
   (let [src-dir (.getAbsoluteFile src-dir)
         command (vec (make-command src-dir))
         command (conj command :dir (str src-dir))
-        result (apply shell/sh command)]
-    (pprint/pprint
-     result
-     (io/writer (io/file src-dir "makefile_output.txt")))))
+        {:keys [exit out err]} (apply shell/sh command)]
+    (with-open [writer (io/writer (io/file src-dir "make_output.txt"))]
+      (.write writer (str "EXIT: " exit "\n"))
+      (.write writer (str "OUT: " out "\n"))
+      (.write writer (str "ERR: " err "\n")))))
 
-; (let [src (find-src-dir (io/file "/home/maksut/oss/raylib-game-template"))]
+; (let [src (find-src-dir (io/file "/home/maksut/oss/raylib-game-template/src"))]
 ;   (make src))
 
 (defn relative-path [^File relative-to ^File file]
@@ -109,7 +114,8 @@
   (let [src? (fn [^File f] (and (.isDirectory f) (= "src" (.getName f))))
         depth (fn [^File f] (-> f .toPath .getNameCount))
         all-src-dirs (filter src? (file-seq dir))]
-    (apply min-key depth all-src-dirs)))
+    (when (seq all-src-dirs)
+      (apply min-key depth all-src-dirs))))
 
 (defn upload-file [builder-dir {:keys [^File tempfile filename]}]
   (io/copy tempfile (io/file builder-dir filename))
@@ -160,21 +166,24 @@
   (let [builder-id (-> request :path-params :builder-id)
         builder-dir (get-builder-dir builder-id)
         src-dir (find-src-dir builder-dir)
-        src-dir (or src-dir (relative-path builder-dir src-dir))
+        src-dir (and src-dir (relative-path builder-dir src-dir))
         upload-path (get-path request ::builder-upload-post {:builder-id builder-id})]
-    {:body (html5
-            (full-page
-             [:form {:enctype "multipart/form-data" :action upload-path :method "post"}
-              [:div
-               [:label {:for "file"} "Upload game source code"]
-               [:input {:type "file" :name "file" :multiple true}]
-               [:button {:type "submit"} "Upload"]]
-              (when src-dir [:p (str "\"src\" dir: " (str src-dir))])]
-             [:ul
-              (map (fn [rel-path]
-                     ;; manually crafting the URL here because reitit insists on encodeing file fragment
-                     [:li [:a {:href (str "/b/" builder-id "/f/" (encode-path rel-path))} (str rel-path)]])
-                   (list-files builder-dir))]))}))
+    (htmx
+     request
+     [:form {:id "upload-form" :enctype "multipart/form-data" :action upload-path :method "post"}
+      [:div
+       [:label {:for "file"} "Upload game source code"]
+       [:input {:type "file" :name "file" :multiple true}]
+       [:button {:type "submit"} "Upload"]
+       [:progress {:id "upload-progress" :value "0" :max "100"}]]
+      (when src-dir [:p (str "\"src\" dir: " (str src-dir))])]
+     [:script
+      (raw "htmx.on('#upload-form', 'htmx:xhr:progress', function(evt) { htmx.find('#upload-progress').setAttribute('value', evt.detail.loaded/evt.detail.total * 100); });")]
+     [:ul
+      (map (fn [rel-path]
+             ;; manually crafting the URL here because reitit insists on encodeing file fragment
+             [:li [:a {:href (str "/b/" builder-id "/f/" (encode-path rel-path))} (str rel-path)]])
+           (list-files builder-dir))])))
 
 (defn builder-file-get [{{:keys [builder-id file]} :path-params}]
   (let [builder-dir (get-builder-dir builder-id)

@@ -2,6 +2,7 @@
 /classes
 /checkouts
 /native
+/datadir
 pom.xml
 pom.xml.asc
 *.jar
