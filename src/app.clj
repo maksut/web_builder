@@ -99,9 +99,6 @@
       (.write writer (str "OUT: " out "\n"))
       (.write writer (str "ERR: " err "\n")))))
 
-; (let [src (find-src-dir (io/file "/home/maksut/oss/raylib-game-template/src"))]
-;   (make src))
-
 (defn relative-path [^File relative-to ^File file]
   (.relativize (.toPath relative-to) (.toPath file)))
 
@@ -117,14 +114,19 @@
     (when (seq all-src-dirs)
       (apply min-key depth all-src-dirs))))
 
+(defn copy-resource [resource dest-dir]
+  (let [resource-name (.getName (io/file resource))]
+    (spit
+     (io/file dest-dir resource-name)
+     (slurp (io/resource resource)))))
+
 (defn upload-file [builder-dir {:keys [^File tempfile filename]}]
   (io/copy tempfile (io/file builder-dir filename))
   (unzip builder-dir filename)
   (when-let [src-dir (find-src-dir builder-dir)]
+    (copy-resource "public/Makefile" src-dir)
+    (copy-resource "public/minshell.html" src-dir)
     (make src-dir)))
-
-; (let [src (find-src-dir (io/file "/home/maksut/projects/web_build/datadir/ytyg0t_XTr2IYKf2QCy5_g"))]
-;   (make src))
 
 (defn assert-file-in-parent! [^File file ^File parent]
   (let [parent-canon (.getCanonicalPath parent)
