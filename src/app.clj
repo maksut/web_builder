@@ -80,12 +80,15 @@
         (string/ends-with? filename ".tar.gz")) (shell/sh "tar" "zxvf" filename :dir builder-dir)
     (string/ends-with? filename ".gz") (shell/sh "gzip -d" filename :dir builder-dir)))
 
-(defn make-command [src-dir]
-  (mapcat
-   #(string/split % #"\s+")
-   ["podman run --rm " ; remove container after exit
-    (str "-v " src-dir ":/game/src") ; volume mapping
-    "-w /game/src raylib:web make PLATFORM=PLATFORM_WEB"])) ; make in working directory
+; (defn make-command [src-dir]
+;   (mapcat
+;    #(string/split % #"\s+")
+;    ["podman run --rm " ; remove container after exit
+;     (str "-v " src-dir ":/game/src") ; volume mapping
+;     "-w /game/src raylib:web make PLATFORM=PLATFORM_WEB"])) ; make in working directory
+
+(defn make-command [_]
+  ["make"])
 
 ; (make-command (.toPath (io/file "/home/maksut/oss/raylib-game-template/src")))
 
@@ -174,11 +177,19 @@
      request
      [:form {:id "upload-form" :enctype "multipart/form-data" :action upload-path :method "post"}
       [:div
-       [:label {:for "file"} "Upload game source code"]
+       [:p "Upload raylib C sources here."]
+       [:p
+        [:ol
+         [:li "With every upload, the builder will unzip it."]
+         [:li "Find the first \"src\" directory."]
+         [:li "Drop in two files: " [:a {:href "/Makefile"} "Makefile"] " & " [:a {:href "/minshell.html"}  "minshell.html"] "."]
+         [:li "Then it will run \"make\" in the \"src\" directory."]]]
+       [:p "If all goes well, you should see a \"makefile_output.txt\" and game files such as \"game.html\"."]
+       [:p "You can try downloading "
+        [:a {:href "https://github.com/raysan5/raylib-game-template/archive/refs/heads/main.zip"} "raylib-game-template.zip"] " and uploading here."]
        [:input {:type "file" :name "file" :multiple true}]
-       [:button {:type "submit"} "Upload"]
-       [:progress {:id "upload-progress" :value "0" :max "100"}]]
-      (when src-dir [:p (str "\"src\" dir: " (str src-dir))])]
+       [:button {:type "submit"} "Upload & make"]
+       (when src-dir [:p (str "\"src\" dir: " (str src-dir))])]]
      [:script
       (raw "htmx.on('#upload-form', 'htmx:xhr:progress', function(evt) { htmx.find('#upload-progress').setAttribute('value', evt.detail.loaded/evt.detail.total * 100); });")]
      [:ul
